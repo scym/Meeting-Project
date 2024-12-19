@@ -44,16 +44,7 @@ class AudioPreprocessor:
 
     def preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
         audio = audio / (np.max(np.abs(audio)) + 1e-10)
-        audio = self.apply_bandpass_filter(audio)
-        audio = nr.reduce_noise(
-            y=audio,
-            sr=self.rate,
-            prop_decrease=0.95,
-            n_std_thresh_stationary=1.5,
-            stationary=True,
-        )
-        return audio
+        return nr.reduce_noise(y=audio, sr=self.rate, prop_decrease=0.95)
 
     def detect_speech(self, audio: np.ndarray) -> bool:
-        energy = np.sum(audio**2) / len(audio)
-        return bool(energy > config.SILENCE_THRESHOLD)
+        return bool(np.sum(audio**2) / len(audio) > 0.0015)

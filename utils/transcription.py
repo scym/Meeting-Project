@@ -1,94 +1,56 @@
-import numpy as np
-import sounddevice as sd
-import threading
-import torch
 import whisper
+import numpy as np
+import torch
 from datetime import datetime
 from collections import deque
-from scipy.signal import butter, lfilter
-import noisereduce as nr
-import logging
-import time
+import threading
 from flask_socketio import SocketIO, emit
-
-socketio = SocketIO()
-from typing import Tuple, List
-from config import RATE, CHANNELS, CHUNK_SIZE, OVERLAP_SIZE, SILENCE_THRESHOLD, OLLAMA_URL, MODEL_NAME
+from utils.audio_processing import AudioPreprocessor
+import logging
+import config
+import requests
+import sounddevice as sd
+import time
 
 logger = logging.getLogger(__name__)
 
-class AudioPreprocessor:
-    def __init__(self, order: int, lowcut: float, highcut: float, rate: int):
-        self.order = order
-        self.lowcut = lowcut
-        self.highcut = highcut
-        self.rate = rate
-
-    def butter_bandpass(self) -> Tuple[np.ndarray, np.ndarray]:
-        nyquist = 0.5 * self.rate
-        low = self.lowcut / nyquist
-        high = self.highcut / nyquist
-        b, a = butter(self.order, [low, high], btype='band')
-        return b, a
-
-    def get_bandpass_coefficients(self) -> Tuple[np.ndarray, np.ndarray]:
-        nyquist = RATE / 2
-        low_freq = 300  # Hz - typical lower bound for speech
-        high_freq = 3400  # Hz - typical upper bound for speech
-        order = 4  # Filter order
-        
-        low = low_freq / nyquist
-        high = high_freq / nyquist
-        
-        b, a = butter(order, [low, high], btype='band')
-        return b, a
-
-    def apply_bandpass_filter(self, data: np.ndarray) -> np.ndarray:
-        b, a = self.get_bandpass_coefficients()
-        filtered_data = lfilter(b, a, data)
-        return filtered_data[0] if isinstance(filtered_data, tuple) else filtered_data
-        
-    def preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
-        audio = audio / (np.max(np.abs(audio)) + 1e-10)
-        audio = self.apply_bandpass_filter(audio)
-        audio = nr.reduce_noise(
-            y=audio,
-            sr=RATE,
-            prop_decrease=0.95,
-            n_std_thresh_stationary=1.5,
-            stationary=True
-        )
-        return audio
-    
-    def detect_speech(self, audio: np.ndarray) -> bool:
-        energy = np.sum(audio ** 2) / len(audio)
-        return bool(energy > SILENCE_THRESHOLD)
-
 class TranscriptionBuffer:
-    def __init__(self, max_size: int = 5):
+    def __init__(self, max_size=5):
         self.buffer = deque(maxlen=max_size)
         self.lock = threading.Lock()
 
-    def add(self, text: str):
+    def add(self, text):
         with self.lock:
             self.buffer.append(text)
 
-    def get_context(self) -> str:
+    def get_context(self):
         with self.lock:
             return " ".join(list(self.buffer))
 
 class MeetingAnalyzer:
     def __init__(self):
-        self.ollama_url = OLLAMA_URL
-        self.model_name = MODEL_NAME
+        self.ollama_url = config.OLLAMA_URL
+        self.model_name = config.MODEL_NAME
 
-    def analyze_text(self, text: str) -> str:
+    def analyze_text(self, text):
         try:
-            # Placeholder for actual analysis logic
-            return "Analysis result"
+            prompt = f"""Analyze the following text:
+            - Key points
+            - Action items
+            - Questions raised
+            
+            Transcript: {text}"""
+
+            response = requests.post(
+                self.ollama_url,
+                json={"model": self.model_name, "prompt": prompt},
+            )
+            if response.status_code == 200:
+                return response.json().get("response", "No analysis available")
+            return f"Error: {response.status_code}"
         except Exception as e:
-            logger.error(f"Error analyzing text: {e}")
-            return ""
+            logger.error(f"Error in analysis: {e}")
+            return "Analysis failed"
 
 class BatchTranscriber:
     def __init__(self, socketio_instance):
@@ -99,7 +61,7 @@ class BatchTranscriber:
         self.buffer = np.array([], dtype=np.float32)
         self.processing_thread = None
         self.buffer_lock = threading.Lock()
-        self.preprocessor = AudioPreprocessor(order=5, lowcut=300.0, highcut=3000.0, rate=RATE)
+        self.preprocessor = AudioPreprocessor(order=5, lowcut=300.0, highcut=3000.0, rate=config.RATE)
         self.transcription_buffer = TranscriptionBuffer()
         
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -110,9 +72,9 @@ class BatchTranscriber:
     def start_recording(self):
         self.stream = sd.InputStream(
             callback=self.audio_callback,
-            channels=CHANNELS,
-            samplerate=RATE,
-            blocksize=int(RATE * 0.1)
+            channels=config.CHANNELS,
+            samplerate=config.RATE,
+            blocksize=int(config.RATE * 0.1)
         )
         self.stream.start()
         self.is_recording = True
@@ -137,11 +99,11 @@ class BatchTranscriber:
             logger.debug(f"Audio callback received {frames} frames")
 
     def process_chunks(self):
-        while self.is_recording or len(self.buffer) >= CHUNK_SIZE:
-            if len(self.buffer) >= CHUNK_SIZE:
+        while self.is_recording or len(self.buffer) >= config.CHUNK_SIZE:
+            if len(self.buffer) >= config.CHUNK_SIZE:
                 with self.buffer_lock:
-                    chunk = np.asarray(self.buffer[:CHUNK_SIZE], dtype=np.float32)
-                    self.buffer = self.buffer[CHUNK_SIZE - OVERLAP_SIZE:]
+                    chunk = np.asarray(self.buffer[:config.CHUNK_SIZE], dtype=np.float32)
+                    self.buffer = self.buffer[config.CHUNK_SIZE - config.OVERLAP_SIZE:]
                 logger.debug(f"Processing chunk of size {len(chunk)}")
                 
                 try:
