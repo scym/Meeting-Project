@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Meeting Assistant</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .container { 
+            max-width: 1000px; 
+            margin: 0 auto; 
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .controls { 
+            margin: 20px 0; 
+            display: flex;
+            gap: 10px;
+        }
+        button { 
+            padding: 10px 20px; 
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #startButton { 
+            background-color: #4CAF50; 
+            color: white; 
+        }
+        #stopButton { 
+            background-color: #f44336; 
+            color: white; 
+        }
+        .columns {
+            display: flex;
+            gap: 20px;
+        }
+        .column {
+            flex: 1;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .entry {
+            margin: 15px 0;
+            padding: 15px;
+            background: #fff;
+            border-radius: 4px;
+            border-left: 4px solid #2196F3;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.8em;
+            margin-bottom: 5px;
+        }
+        .text {
+            margin: 10px 0;
+        }
+        .analysis {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+            font-size: 0.9em;
+            white-space: pre-line;
+        }
+        #audioLevel {
+            width: 100%;
+            height: 20px;
+            background-color: #ddd;
+            margin: 10px 0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #levelIndicator {
+            height: 100%;
+            width: 0%;
+            background-color: #4CAF50;
+            transition: width 0.1s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Meeting Assistant</h1>
+        <div class="controls">
+            <button id="startButton" onclick="startRecording()">Start Recording</button>
+            <button id="stopButton" onclick="stopRecording()">Stop Recording</button>
+        </div>
+        <div id="status">Status: Not recording</div>
+        <div id="audioLevel">
+            <div id="levelIndicator"></div>
+        </div>
+        <div class="columns">
+            <div class="column" id="transcriptColumn">
+                <h2>Transcription</h2>
+                <div id="transcript"></div>
+            </div>
+            <div class="column" id="analysisColumn">
+                <h2>Analysis</h2>
+                <div id="analysis"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let isRecording = false;
+
+        function startRecording() {
+            socket.emit('start_recording');
+            document.getElementById('status').textContent = 'Status: Recording';
+            document.getElementById('status').className = 'recording';
+            document.getElementById('startButton').disabled = true;
+            isRecording = true;
+        }
+
+        function stopRecording() {
+            socket.emit('stop_recording');
+            document.getElementById('status').textContent = 'Status: Not recording';
+            document.getElementById('status').className = '';
+            document.getElementById('startButton').disabled = false;
+            isRecording = false;
+        }
+
+        socket.on('transcription', function(data) {
+            const transcriptDiv = document.getElementById('transcript');
+            const analysisDiv = document.getElementById('analysis');
+            const entryDiv = document.createElement('div');
+            entryDiv.className = 'entry';
+            
+            let content = `
+                <div class="timestamp">[${data.timestamp}]</div>
+                <div class="text">${data.text}</div>
+            `;
+            
+            entryDiv.innerHTML = content;
+            transcriptDiv.insertBefore(entryDiv, transcriptDiv.firstChild);
+
+            if (data.analysis) {
+                const analysisEntryDiv = document.createElement('div');
+                analysisEntryDiv.className = 'entry';
+                analysisEntryDiv.innerHTML = `
+                    <div class="timestamp">[${data.timestamp}]</div>
+                    <div class="analysis">${data.analysis}</div>
+                `;
+                analysisDiv.insertBefore(analysisEntryDiv, analysisDiv.firstChild);
+            }
+        });
+
+        socket.on('audio_level', function(level) {
+            const indicator = document.getElementById('levelIndicator');
+            indicator.style.width = `${Math.min(100, level * 100)}%`;
+        });
+
+        socket.on('status', function(data) {
+            document.getElementById('status').textContent = 'Status: ' + data.message;
+        });
+    </script>
+</body>
+</html>

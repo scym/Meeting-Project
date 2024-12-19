@@ -1,0 +1,9 @@
+flask
+flask-socketio
+torch
+whisper
+numpy
+sounddevice
+scipy
+noisereduce
+requests
